@@ -1,3 +1,4 @@
+import json
 import logging
 from random import randint
 from time import time
@@ -50,6 +51,7 @@ class TemplateAgent(DefaultParty):
 
         self.last_received_bid: Bid = None
         self.opponent_model: OpponentModel = None
+        self.history = {}
         self.logger.log(logging.INFO, "party is initialized")
 
     def notifyChange(self, data: Inform):
@@ -72,7 +74,7 @@ class TemplateAgent(DefaultParty):
 
             self.parameters = self.settings.getParameters()
             self.storage_dir = self.parameters.get("storage_dir")
-
+            self.load_history()
             # the profile contains the preferences of the agent over the domain
             profile_connection = ProfileConnectionFactory.create(
                 data.getProfile().getURI(), self.getReporter()
@@ -162,62 +164,203 @@ class TemplateAgent(DefaultParty):
         """This method is called when it is our turn. It should decide upon an action
         to perform and send this action to the opponent.
         """
-        # check if the last received offer is good enough
+        # Check if the last received offer is good enough
         if self.accept_condition(self.last_received_bid):
-            # if so, accept the offer
             action = Accept(self.me, self.last_received_bid)
         else:
-            # if not, find a bid to propose as counter offer
+            # Attempt to find a bid
             bid = self.find_bid()
+            if bid is None:
+                self.logger.log(logging.WARNING, "No valid bid found. Retrying with fallback strategy.")
+                # Fallback strategy: Use a random bid
+                bid = AllBidsList(self.profile.getDomain()).get(randint(0, 500))
+        
             action = Offer(self.me, bid)
 
-        # send the action
+        # Send the action
         self.send_action(action)
 
+
     def save_data(self):
-        """This method is called after the negotiation is finished. It can be used to store data
-        for learning capabilities. Note that no extensive calculations can be done within this method.
-        Taking too much time might result in your agent being killed, so use it for storage only.
-        """
-        data = "Data for learning (see README.md)"
-        with open(f"{self.storage_dir}/data.md", "w") as f:
-            f.write(data)
+        if self.other:
+            self.history[self.other] = {
+                "bids": [
+                    {
+                        issue: str(value) 
+                        for issue, value in bid.items()  # Access as dictionary
+                    }
+                    for bid in self.opponent_model.get_bid_history()
+                ],
+                "preferences": {
+                    issue: {
+                        str(value): utility
+                        for value, utility in preferences.items()
+                    }
+                    for issue, preferences in self.opponent_model.get_preferences().items()
+                },
+            }
+        with open(f"{self.storage_dir}/history.json", "w") as f:
+            json.dump(self.history, f)
+    def load_history(self):
+        try:
+            with open(f"{self.storage_dir}/history.json", "r") as f:
+                self.history = json.load(f)
+        except FileNotFoundError:
+            self.history = {}
+            self.logger.log(logging.INFO, "No previous history found.")
 
     ###########################################################################################
     ################################## Example methods below ##################################
     ###########################################################################################
 
     def accept_condition(self, bid: Bid) -> bool:
+        """
+        Determines whether to accept the opponent's bid based on advanced strategies.
+
+        Args:
+            bid (Bid): The last received bid from the opponent.
+
+        Returns:
+            bool: True if the bid should be accepted; False otherwise.
+        """
         if bid is None:
             return False
 
-        # progress of the negotiation session between 0 and 1 (1 is deadline)
         progress = self.progress.get(time() * 1000)
+        our_utility = float(self.profile.getUtility(bid))
+        opponent_utility = (
+            self.opponent_model.get_predicted_utility(bid) if self.opponent_model else 0.0
+        )
 
-        # very basic approach that accepts if the offer is valued above 0.7 and
-        # 95% of the time towards the deadline has passed
-        conditions = [
-            self.profile.getUtility(bid) > 0.8,
-            progress > 0.95,
-        ]
-        return all(conditions)
+        # Dynamic Acceptance Threshold
+        # Threshold starts high and reduces gradually, but adjusts based on opponent behavior
+        dynamic_threshold = max(0.9 - progress * 0.2, 0.7)
+        
+
+        # Nash Equilibrium Check
+        nash_product = our_utility * opponent_utility
+        nash_threshold = 0.8 * max(nash_product, 0.5)  # Moderate Nash-based threshold
+
+        # Pareto Optimality Check
+        is_pareto = True
+        if self.opponent_model and self.last_received_bid:
+            prev_opponent_utility = self.opponent_model.get_predicted_utility(self.last_received_bid)
+            prev_our_utility = float(self.profile.getUtility(self.last_received_bid))
+            is_pareto = (
+                opponent_utility >= prev_opponent_utility
+                and our_utility >= prev_our_utility
+            )
+
+        # Time-Sensitive Risk Adjustment
+        risk_tolerance = max(0.85, progress + 0.1)
+
+        # Enhanced Acceptance Logic
+        accept = all(
+            [
+                our_utility >= dynamic_threshold,
+                nash_product >= nash_threshold,
+                is_pareto,
+                our_utility >= risk_tolerance,
+                progress > 0.85,  # Avoid early acceptance
+            ]
+        )
+
+        # Logging for debugging
+        self.logger.log(
+            logging.INFO,
+            f"Accept Condition: {accept}, Our Utility: {our_utility}, Opponent Utility: {opponent_utility}, "
+            f"Progress: {progress}, Dynamic Threshold: {dynamic_threshold}, Nash Product: {nash_product}, "
+            f"Pareto Optimal: {is_pareto}, Risk Tolerance: {risk_tolerance}",
+        )
+        return accept
 
     def find_bid(self) -> Bid:
-        # compose a list of all possible bids
+        """
+        Find a Pareto-efficient bid based on the adaptive concession strategy and fairness metrics.
+        """
+        if self.profile is None:
+            raise ValueError("Profile not initialized")
+
         domain = self.profile.getDomain()
         all_bids = AllBidsList(domain)
 
-        best_bid_score = 0.0
+        # Determine Concession Threshold
+        progress = self.progress.get(time() * 1000)
+        base_threshold = 0.9 - progress * 0.2  # Concession increases with time
+
+        # Multi-Stage Concession
+        if progress < 0.5:
+            threshold = base_threshold  # Hard-bargaining early
+        elif progress < 0.85:
+            threshold = base_threshold * 0.9  # Moderate concessions in mid-stage
+        else:
+            threshold = base_threshold * 0.8  # More cooperative in the final stage
+
+        pareto_bids = self.filter_pareto_bids(all_bids)
+        if not pareto_bids:
+            self.logger.log(logging.ERROR, "No Pareto-efficient bids found!")
+            return None
+
         best_bid = None
+        best_score = float("-inf")
 
-        # take 500 attempts to find a bid according to a heuristic score
-        for _ in range(500):
-            bid = all_bids.get(randint(0, all_bids.size() - 1))
-            bid_score = self.score_bid(bid)
-            if bid_score > best_bid_score:
-                best_bid_score, best_bid = bid_score, bid
+        for bid in pareto_bids:
+            refined_bid = self.refine_bid(bid)
+            if refined_bid is None:
+                continue
 
+            # Consider both utility and fairness
+            our_utility = self.profile.getUtility(refined_bid)
+            opponent_utility = (
+                self.opponent_model.get_predicted_utility(refined_bid)
+                if self.opponent_model
+                else 0
+            )
+            fairness_score = self.calculate_fairness_score(our_utility, opponent_utility)
+
+            # Dynamic scoring combining utility and fairness
+            score = self.score_bid_advanced(refined_bid) + fairness_score
+            if score > best_score and our_utility >= threshold:
+                best_score = score
+                best_bid = refined_bid
+
+        if best_bid is None:
+            self.logger.log(logging.ERROR, "No valid bid found after refinement!")
         return best_bid
+
+
+    def calculate_fairness_score(self, our_utility, opponent_utility, fairness_weight=0.5):
+    
+        # Ensure both utilities are converted to float for compatibility
+        our_utility = float(our_utility)
+        opponent_utility = float(opponent_utility)
+
+        # Nash product as a measure of fairness
+        nash_product = our_utility * opponent_utility
+        return fairness_weight * nash_product
+
+
+    
+    def filter_pareto_bids(self, all_bids: AllBidsList) -> list:
+        #"""Filter bids that are Pareto-efficient."""
+        pareto_bids = []
+        for _ in range(1000):  # Evaluate a subset for efficiency
+            bid = all_bids.get(randint(0, all_bids.size() - 1))
+            self_utility = self.profile.getUtility(bid)
+            opponent_utility = (
+               self.opponent_model.get_predicted_utility(bid) if self.opponent_model else 0
+            )
+
+            # Check if the bid dominates others in terms of both utilities
+            if self.is_pareto_dominant(bid, self_utility, opponent_utility):
+                pareto_bids.append(bid)
+
+        self.logger.log(logging.INFO, f"Filtered {len(pareto_bids)} Pareto-efficient bids")
+        return pareto_bids
+
+    def is_pareto_dominant(self, bid, self_utility, opponent_utility) -> bool:
+        """Determine if a bid is Pareto-efficient."""
+        return self_utility > 0.7 and opponent_utility > 0.5
 
     def score_bid(self, bid: Bid, alpha: float = 0.95, eps: float = 0.1) -> float:
         """Calculate heuristic score for a bid
@@ -245,3 +388,72 @@ class TemplateAgent(DefaultParty):
             score += opponent_score
 
         return score
+    
+    def score_bid_advanced(self, bid: Bid, alpha: float = 0.7, beta: float = 0.3) -> float:
+        """Advanced heuristic score for a bid considering fairness and time pressure."""
+        progress = self.progress.get(time() * 1000)
+
+        # Convert utilities to float
+        our_utility = float(self.profile.getUtility(bid))
+        opponent_utility = (
+            float(self.opponent_model.get_predicted_utility(bid)) if self.opponent_model else 0.0
+        )
+
+        # Time pressure: Encourage concessions near the deadline
+        time_pressure = 1.0 - progress ** 2
+
+        # Multi-objective scoring
+        score = (
+            alpha * our_utility  # Weight for self-utility
+            + beta * opponent_utility  # Weight for opponent utility
+            + time_pressure * our_utility  # Adjust for time pressure
+        )
+        return score
+
+    
+    def refine_bid(self, initial_bid: Bid, iterations: int = 10, step_size: float = 0.1) -> Bid:
+        """Refine the bid using a gradient-based approach."""
+        if initial_bid is None:
+            self.logger.log(logging.ERROR, "Initial bid for refinement is None!")
+            return None
+
+        refined_bid = initial_bid
+        best_score = self.score_bid_advanced(refined_bid)
+
+        for _ in range(iterations):
+            neighbors = self.generate_neighbors(refined_bid)
+            if not neighbors:
+                self.logger.log(logging.WARNING, f"No neighbors generated for bid: {refined_bid}")
+                continue
+
+            for neighbor in neighbors:
+                score = self.score_bid_advanced(neighbor)
+                if score > best_score:
+                    best_score = score
+                    refined_bid = neighbor
+
+        return refined_bid if refined_bid else initial_bid
+
+
+    def generate_neighbors(self, bid: Bid) -> list:
+        """Generate neighboring bids by tweaking issue values."""
+        domain = self.profile.getDomain()
+        neighbors = []
+
+        for issue in domain.getIssues():
+            values = domain.getValues(issue)
+
+            for value in values:
+                # Avoid generating the same bid by skipping the current value
+                if bid.getValue(issue) != value:
+                    # Create a new bid by modifying the issue's value
+                    new_bid_values = bid.getIssueValues().copy()
+                    new_bid_values[issue] = value
+                    new_bid = Bid(new_bid_values)
+                    neighbors.append(new_bid)
+
+        return neighbors
+
+
+
+

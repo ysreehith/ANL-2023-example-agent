@@ -55,6 +55,25 @@ class OpponentModel:
         )
 
         return predicted_utility
+    
+    def get_bid_history(self):
+        """
+        Returns a list of all bids received from the opponent.
+        """
+        return [
+            {issue: str(bid.getValue(issue)) for issue in bid.getIssueValues()}
+            for bid in self.offers
+        ]
+
+    def get_preferences(self):
+        """
+        Returns a dictionary summarizing the opponent's preferences
+        for each issue based on the observed bids.
+        """
+        preferences = {}
+        for issue_id, issue_estimator in self.issue_estimators.items():
+            preferences[issue_id] = issue_estimator.get_preference_summary()
+        return preferences
 
 
 class IssueEstimator:
@@ -101,6 +120,18 @@ class IssueEstimator:
             return self.value_trackers[value].utility
 
         return 0
+    
+    def get_preference_summary(self):
+        """
+        Returns a summary of preferences for this issue, showing the utility of each value.
+
+        Returns:
+            dict: A dictionary of values and their utilities.
+        """
+        return {
+            str(value): tracker.utility
+            for value, tracker in self.value_trackers.items()
+        }
 
 
 class ValueEstimator:
