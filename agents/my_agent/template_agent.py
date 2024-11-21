@@ -3,6 +3,7 @@ import logging
 from random import randint
 from time import time
 from typing import cast
+from math import floor
 
 from geniusweb.actions.Accept import Accept
 from geniusweb.actions.Action import Action
@@ -52,6 +53,14 @@ class TemplateAgent(DefaultParty):
         self.last_received_bid: Bid = None
         self.opponent_model: OpponentModel = None
         self.history = {}
+        self.data_dict = {"sessions": []}  # To store session data
+
+        # Variables for session tracking
+        self.utility_at_finish: float = 0
+        self.did_accept: bool = False
+        self.top_bids_percentage: float = 1 / 300
+        self.force_accept_at_remaining_turns: float = 1
+        self.logger.log(logging.INFO, "party is initialized")
         self.logger.log(logging.INFO, "party is initialized")
 
     def notifyChange(self, data: Inform):
@@ -103,9 +112,13 @@ class TemplateAgent(DefaultParty):
 
         # Finished will be send if the negotiation has ended (through agreement or deadline)
         elif isinstance(data, Finished):
+            self.utility_at_finish = (
+                float(self.profile.getUtility(self.last_received_bid))
+                if self.last_received_bid
+                else 0
+            )
             self.save_data()
-            # terminate the agent MUST BE CALLED
-            self.logger.log(logging.INFO, "party is terminating:")
+            self.logger.log(logging.INFO, "party is terminating")
             super().terminate()
         else:
             self.logger.log(logging.WARNING, "Ignoring unknown info " + str(data))
@@ -167,6 +180,7 @@ class TemplateAgent(DefaultParty):
         # Check if the last received offer is good enough
         if self.accept_condition(self.last_received_bid):
             action = Accept(self.me, self.last_received_bid)
+            self.did_accept = True
         else:
             # Attempt to find a bid
             bid = self.find_bid()
@@ -182,32 +196,44 @@ class TemplateAgent(DefaultParty):
 
 
     def save_data(self):
+        """Save session data, appending to the history of the opponent."""
+        progress_at_finish = self.progress.get(time() * 1000)
+        session_data = {
+            "progressAtFinish": progress_at_finish,
+            "utilityAtFinish": self.utility_at_finish,
+            "didAccept": self.did_accept,
+            "isGood": self.utility_at_finish >= 0.7,
+            "topBidsPercentage": self.top_bids_percentage,
+            "forceAcceptAtRemainingTurns": self.force_accept_at_remaining_turns,
+        }
+        self.data_dict["sessions"].append(session_data)
+
         if self.other:
-            self.history[self.other] = {
-                "bids": [
-                    {
-                        issue: str(value) 
-                        for issue, value in bid.items()  # Access as dictionary
-                    }
-                    for bid in self.opponent_model.get_bid_history()
-                ],
-                "preferences": {
-                    issue: {
-                        str(value): utility
-                        for value, utility in preferences.items()
-                    }
-                    for issue, preferences in self.opponent_model.get_preferences().items()
-                },
-            }
-        with open(f"{self.storage_dir}/history.json", "w") as f:
-            json.dump(self.history, f)
+            filename = f"{self.storage_dir}/{self.other}.json"
+            try:
+                with open(filename, "r") as f:
+                    existing_data = json.load(f)
+                existing_data["sessions"].extend(self.data_dict["sessions"])
+                self.data_dict = existing_data  # Update the data_dict
+            except FileNotFoundError:
+                self.logger.log(logging.INFO, "No previous data found; creating new data file.")
+
+            with open(filename, "w") as f:
+                json.dump(self.data_dict, f, indent=4)
+            self.logger.log(logging.INFO, f"Session data saved to {filename}")
+
     def load_history(self):
-        try:
-            with open(f"{self.storage_dir}/history.json", "r") as f:
-                self.history = json.load(f)
-        except FileNotFoundError:
-            self.history = {}
-            self.logger.log(logging.INFO, "No previous history found.")
+        """Load session history for the opponent."""
+        if self.other:
+            filename = f"{self.storage_dir}/{self.other}.json"
+            try:
+                with open(filename, "r") as f:
+                    self.data_dict = json.load(f)
+                self.logger.log(logging.INFO, f"Loaded data from {filename}")
+            except FileNotFoundError:
+                self.data_dict = {"sessions": []}
+                self.logger.log(logging.INFO, f"No previous data found for {self.other}")
+
 
     ###########################################################################################
     ################################## Example methods below ##################################
