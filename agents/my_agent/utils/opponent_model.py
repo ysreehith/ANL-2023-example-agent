@@ -17,6 +17,7 @@ class OpponentModel:
         }
         self.hypotheses_candidates = generate_candidate_hypotheses(self.num_candidate_hypotheses, len(self.issue_estimators))
         self.beliefs = initialize_priors(self.num_candidate_hypotheses)
+        self.reservation_value = 0.5 # can be changed 
 
     def update(self, bid: Bid):
         # keep track of all bids received
@@ -31,7 +32,7 @@ class OpponentModel:
     def get_predicted_utility(self, bid: Bid):
         if len(self.offers) == 0 or bid is None:
             return 0
-        predicted_utility = estimate_preference(self.beliefs, self.hypotheses_candidates)
+        predicted_utility = estimate_preference(self.beliefs, self.hypotheses_candidates, self.reservation_value)
 
         return predicted_utility
 

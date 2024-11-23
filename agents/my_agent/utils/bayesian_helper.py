@@ -19,9 +19,16 @@ def update_beliefs(priors, candidates, observed_offer : Bid, issue_estimators):
     issues = [observed_offer.getValue(issue_id) for issue_id, issue_estimator in issue_estimators.items()]
     likelihoods = np.array([opponent_utility(issues, candidate) for candidate in candidates])
     posterior = priors * likelihoods
-    return posterior / np.sum(posterior)
+    total = np.sum(posterior)
+    if total == 0:
+        return priors
+    else:
+        return posterior / total
 
-def estimate_preference(beliefs, candidates):
+def estimate_preference(beliefs, candidates, reservation_value):
+    if np.all(beliefs == 0):
+        # least possible utility below which opponent wouldn't accept offer
+        return reservation_value
     return np.average(candidates, axis=0, weights=beliefs)
 
 
