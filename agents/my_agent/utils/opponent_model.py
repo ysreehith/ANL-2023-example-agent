@@ -55,25 +55,6 @@ class OpponentModel:
         )
 
         return predicted_utility
-    
-    def get_bid_history(self):
-        """
-        Returns a list of all bids received from the opponent.
-        """
-        return [
-            {issue: str(bid.getValue(issue)) for issue in bid.getIssueValues()}
-            for bid in self.offers
-        ]
-
-    def get_preferences(self):
-        """
-        Returns a dictionary summarizing the opponent's preferences
-        for each issue based on the observed bids.
-        """
-        preferences = {}
-        for issue_id, issue_estimator in self.issue_estimators.items():
-            preferences[issue_id] = issue_estimator.get_preference_summary()
-        return preferences
 
 
 class IssueEstimator:
@@ -88,10 +69,10 @@ class IssueEstimator:
         self.num_values = value_set.size()
         self.value_trackers = defaultdict(ValueEstimator)
         self.weight = 0
+        self.previous_bid_value = None 
 
     def update(self, value: Value):
         self.bids_received += 1
-
         # get the value tracker of the value that is offered
         value_tracker = self.value_trackers[value]
 
@@ -102,14 +83,13 @@ class IssueEstimator:
         self.max_value_count = max([value_tracker.count, self.max_value_count])
 
         # update predicted issue weight
-        # the intuition here is that if the values of the receiverd offers spread out over all
-        # possible values, then this issue is likely not important to the opponent (weight == 0.0).
-        # If all received offers proposed the same value for this issue,
-        # then the predicted issue weight == 1.0
-        equal_shares = self.bids_received / self.num_values
-        self.weight = (self.max_value_count - equal_shares) / (
-            self.bids_received - equal_shares
-        )
+        # the intuition here is that if the value of the issue is unchanged, it means that the weight if this issue is more
+        # that is, its an issue that the agent is not willing to compromise on 
+        if self.previous_bid_value == None: # first bid for this issue 
+            self.weight = 1
+        elif self.previous_bid_value == value: 
+            self.weight += 0.2 # epsilon value is set to 0.2 as per the paper 
+        self.previous_bid_value = value
 
         # recalculate all value utilities
         for value_tracker in self.value_trackers.values():
@@ -120,18 +100,6 @@ class IssueEstimator:
             return self.value_trackers[value].utility
 
         return 0
-    
-    def get_preference_summary(self):
-        """
-        Returns a summary of preferences for this issue, showing the utility of each value.
-
-        Returns:
-            dict: A dictionary of values and their utilities.
-        """
-        return {
-            str(value): tracker.utility
-            for value, tracker in self.value_trackers.items()
-        }
 
 
 class ValueEstimator:
