@@ -44,36 +44,19 @@ class OpponentModel:
             total_issue_weight += issue_estimator.weight
 
         # normalise the issue weights such that the sum is 1.0
-        if total_issue_weight == 0.0:
+        # here the issue weight is the fraction of the total bids received for this issue 
+        """if total_issue_weight == 0.0:
             issue_weights = [1 / len(issue_weights) for _ in issue_weights]
         else:
-            issue_weights = [iw / total_issue_weight for iw in issue_weights]
-
+            issue_weights = [iw / total_issue_weight for iw in issue_weights]"""
+        # don't need to check for empty condition as that is already satisfied here 
+        issue_weights = [iw/len(self.offers) for iw in issue_weights]
         # calculate predicted utility by multiplying all value utilities with their issue weight
         predicted_utility = sum(
             [iw * vu for iw, vu in zip(issue_weights, value_utilities)]
         )
 
         return predicted_utility
-    
-    def get_bid_history(self):
-        """
-        Returns a list of all bids received from the opponent.
-        """
-        return [
-            {issue: str(bid.getValue(issue)) for issue in bid.getIssueValues()}
-            for bid in self.offers
-        ]
-
-    def get_preferences(self):
-        """
-        Returns a dictionary summarizing the opponent's preferences
-        for each issue based on the observed bids.
-        """
-        preferences = {}
-        for issue_id, issue_estimator in self.issue_estimators.items():
-            preferences[issue_id] = issue_estimator.get_preference_summary()
-        return preferences
 
 
 class IssueEstimator:
@@ -82,9 +65,10 @@ class IssueEstimator:
             raise TypeError(
                 "This issue estimator only supports issues with discrete values"
             )
-
+        # total bids received for this issue 
         self.bids_received = 0
         self.max_value_count = 0
+        # total unique values for this issue  
         self.num_values = value_set.size()
         self.value_trackers = defaultdict(ValueEstimator)
         self.weight = 0
@@ -106,10 +90,12 @@ class IssueEstimator:
         # possible values, then this issue is likely not important to the opponent (weight == 0.0).
         # If all received offers proposed the same value for this issue,
         # then the predicted issue weight == 1.0
-        equal_shares = self.bids_received / self.num_values
+        # here, if an issue is more frequent, then it has more weight 
+        """equal_shares = self.bids_received / self.num_values
         self.weight = (self.max_value_count - equal_shares) / (
             self.bids_received - equal_shares
-        )
+        )"""
+        self.weight = self.bids_received
 
         # recalculate all value utilities
         for value_tracker in self.value_trackers.values():
@@ -120,18 +106,6 @@ class IssueEstimator:
             return self.value_trackers[value].utility
 
         return 0
-    
-    def get_preference_summary(self):
-        """
-        Returns a summary of preferences for this issue, showing the utility of each value.
-
-        Returns:
-            dict: A dictionary of values and their utilities.
-        """
-        return {
-            str(value): tracker.utility
-            for value, tracker in self.value_trackers.items()
-        }
 
 
 class ValueEstimator:
