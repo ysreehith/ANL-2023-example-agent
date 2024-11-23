@@ -465,6 +465,3 @@ class TemplateAgent(DefaultParty):
     def is_pareto_dominant(self, bid, self_utility, opponent_utility) -> bool:
         """Determine if a bid is Pareto-efficient."""
         return self_utility > 0.7 and opponent_utility > 0.5
-
-
-
