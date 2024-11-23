@@ -4,16 +4,20 @@ from geniusweb.issuevalue.Bid import Bid
 from geniusweb.issuevalue.DiscreteValueSet import DiscreteValueSet
 from geniusweb.issuevalue.Domain import Domain
 from geniusweb.issuevalue.Value import Value
+from bayesian_helper import generate_candidate_hypotheses, initialize_priors, update_beliefs, estimate_preference
 
 
 class OpponentModel:
     def __init__(self, domain: Domain):
         self.offers = []
         self.domain = domain
-
+        self.num_candidate_hypotheses = 10
         self.issue_estimators = {
             i: IssueEstimator(v) for i, v in domain.getIssuesValues().items()
         }
+        self.hypotheses_candidates = generate_candidate_hypotheses(self.num_candidate_hypotheses, len(self.issue_estimators))
+        self.beliefs = initialize_priors(self.num_candidate_hypotheses)
+        self.reservation_value = 0.5 # can be changed 
 
     def update(self, bid: Bid):
         # keep track of all bids received
@@ -23,36 +27,12 @@ class OpponentModel:
         for issue_id, issue_estimator in self.issue_estimators.items():
             issue_estimator.update(bid.getValue(issue_id))
 
+        self.beliefs = update_beliefs(self.beliefs, self.hypotheses_candidates, bid, self.issue_estimators)
+
     def get_predicted_utility(self, bid: Bid):
         if len(self.offers) == 0 or bid is None:
             return 0
-
-        # initiate
-        total_issue_weight = 0.0
-        value_utilities = []
-        issue_weights = []
-
-        for issue_id, issue_estimator in self.issue_estimators.items():
-            # get the value that is set for this issue in the bid
-            value: Value = bid.getValue(issue_id)
-
-            # collect both the predicted weight for the issue and
-            # predicted utility of the value within this issue
-            value_utilities.append(issue_estimator.get_value_utility(value))
-            issue_weights.append(issue_estimator.weight)
-
-            total_issue_weight += issue_estimator.weight
-
-        # normalise the issue weights such that the sum is 1.0
-        if total_issue_weight == 0.0:
-            issue_weights = [1 / len(issue_weights) for _ in issue_weights]
-        else:
-            issue_weights = [iw / total_issue_weight for iw in issue_weights]
-
-        # calculate predicted utility by multiplying all value utilities with their issue weight
-        predicted_utility = sum(
-            [iw * vu for iw, vu in zip(issue_weights, value_utilities)]
-        )
+        predicted_utility = estimate_preference(self.beliefs, self.hypotheses_candidates, self.reservation_value)
 
         return predicted_utility
 
