@@ -1,3 +1,4 @@
+## Adaptive Negotiation Agent with Learning-Based Strategies for Bilateral Negotiations
 
 This is a repository containing all the code written for the group project taken under the CSC 555 : Social Computing and Decentralized Artificial Intelligence course at NC State University.  This repository has been forked from the template repository given for [ANL 2023](https://github.com/brenting/ANL-2023-example-agent/tree/main)
 
@@ -33,4 +34,7 @@ The code of GeniusWebPython is properly documented. Exploring the class definiti
 
 [More documentation can be found here](https://tracinsy.ewi.tudelft.nl/pubtrac/GeniusWebPython/wiki/WikiStart). This documentation was written for the Java version of GeniusWeb, but classes and functionality are identical as much as possible.
 
-## Notes
+## Team Members 
+- Krithika Ragothaman (kragoth)
+- Raj Kalantri (rkalant)
+- Sreehith Yachamaneni (syacham)
