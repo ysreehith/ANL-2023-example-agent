@@ -1,10 +1,11 @@
 from collections import defaultdict
+import numpy as np
 
 from geniusweb.issuevalue.Bid import Bid
 from geniusweb.issuevalue.DiscreteValueSet import DiscreteValueSet
 from geniusweb.issuevalue.Domain import Domain
 from geniusweb.issuevalue.Value import Value
-from bayesian_helper import generate_candidate_hypotheses, initialize_priors, update_beliefs, estimate_preference
+from .bayesian_helper import generate_candidate_hypotheses, initialize_priors, update_beliefs, estimate_preference
 
 
 class OpponentModel:
