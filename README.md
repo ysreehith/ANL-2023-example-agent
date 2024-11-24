@@ -1,6 +1,8 @@
 
 This is a repository containing all the code written for the group project taken under the CSC 555 : Social Computing and Decentralized Artificial Intelligence course at NC State University.  This repository has been forked from the template repository given for [ANL 2023](https://github.com/brenting/ANL-2023-example-agent/tree/main)
 
+In this project, we address the challenge of improving autonomous negotiation outcomes by developing an intelligent agent capable of learning from previous interactions. Unlike traditional negotiation systems that rely on static strategies, our agent integrates dynamic learning capabilities, allowing it to adapt and refine its behavior over time. A central feature of this agent is its ability to store and analyze detailed session data after each negotiation. 
+
 ## Overview
 - directories:
     - `agents`: Contains directories with the agents. The `template_agent` directory contains the template agent for the ANL competition. Our agent is present under the `my_agent` directory.
